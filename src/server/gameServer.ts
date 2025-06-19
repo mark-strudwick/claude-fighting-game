@@ -29,7 +29,7 @@ export class GameServer {
     };
     
     this.setupSocketListeners();
-    this.startGameLoop();
+    // Legacy game loop removed - using per-lobby game loops instead
   }
 
   private setupSocketListeners(): void {
@@ -122,20 +122,7 @@ export class GameServer {
     });
   }
 
-  private startGameLoop(): void {
-    const TICK_RATE = 60;
-    const TICK_INTERVAL = 1000 / TICK_RATE;
-    
-    setInterval(() => {
-      this.gameEngine.update(TICK_INTERVAL, this.playerInputs);
-      this.broadcastGameState();
-    }, TICK_INTERVAL);
-  }
-
-  private broadcastGameState(): void {
-    const gameState = this.gameEngine.getGameState();
-    this.io.emit('gameState', gameState);
-  }
+  // Legacy game loop methods removed - using per-lobby game loops instead
 
   private broadcastQueueUpdates(gameMode: string): void {
     // Update all players in the same queue about the new queue status

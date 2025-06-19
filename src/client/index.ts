@@ -21,6 +21,7 @@ class GameClient {
   private clientState: ClientState | null = null;
   private lastFrameTime = 0;
   private currentScreen: string = 'menu';
+  private currentPlayerId: string | null = null;
 
   constructor() {
     this.canvas = document.getElementById('gameCanvas') as HTMLCanvasElement;
@@ -38,6 +39,7 @@ class GameClient {
   private setupSocketListeners(): void {
     this.socket.on('connect', () => {
       console.log('Connected to server');
+      this.currentPlayerId = this.socket.id || null;
       this.updateConnectionStatus('Connected');
     });
 
@@ -248,10 +250,13 @@ class GameClient {
       this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
       
       if (this.gameState) {
-        this.renderer.render(this.gameState);
+        this.renderer.render(this.gameState, this.currentPlayerId);
       } else {
         this.renderer.renderWaitingScreen();
       }
+    } else {
+      // Clear canvas when not in game screen to prevent artifacts
+      this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     }
   }
 }

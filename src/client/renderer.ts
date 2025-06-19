@@ -11,12 +11,27 @@ export class GameRenderer {
     this.height = height;
   }
 
-  render(gameState: GameState): void {
+  render(gameState: GameState, currentPlayerId?: string | null): void {
+    // Save initial canvas state
+    this.ctx.save();
+    
+    // Reset canvas state to prevent flashing
+    this.ctx.globalAlpha = 1.0;
+    this.ctx.shadowColor = 'transparent';
+    this.ctx.shadowBlur = 0;
+    
     this.renderArena(gameState.arena);
-    this.renderPlayers(gameState.players);
+    this.renderPlayers(gameState.players, currentPlayerId);
     this.renderProjectiles(gameState.projectiles);
     this.renderUI(gameState);
     this.renderControls();
+    
+    if (currentPlayerId && gameState.players[currentPlayerId]) {
+      this.renderPlayerHotbar(gameState.players[currentPlayerId]);
+    }
+    
+    // Restore initial canvas state
+    this.ctx.restore();
   }
 
   renderWaitingScreen(): void {
@@ -45,13 +60,13 @@ export class GameRenderer {
     this.ctx.fill();
   }
 
-  private renderPlayers(players: { [id: string]: Player }): void {
+  private renderPlayers(players: { [id: string]: Player }, currentPlayerId?: string | null): void {
     Object.values(players).forEach(player => {
-      this.renderPlayer(player);
+      this.renderPlayer(player, player.id === currentPlayerId);
     });
   }
 
-  private renderPlayer(player: Player): void {
+  private renderPlayer(player: Player, isCurrentPlayer: boolean = false): void {
     const screenX = this.width / 2 + player.position.x;
     const screenY = this.height / 2 + player.position.y;
     
@@ -74,7 +89,11 @@ export class GameRenderer {
     this.ctx.stroke();
     
     this.renderHealthBar(player, screenX, screenY);
-    this.renderAbilityCooldowns(player, screenX, screenY);
+    
+    // Only render ability cooldowns for other players (not current player)
+    if (!isCurrentPlayer) {
+      this.renderAbilityCooldowns(player, screenX, screenY);
+    }
   }
 
   private renderHealthBar(player: Player, x: number, y: number): void {
@@ -98,6 +117,8 @@ export class GameRenderer {
 
   private renderProjectiles(projectiles: Projectile[]): void {
     projectiles.forEach(projectile => {
+      this.ctx.save();
+      
       const screenX = this.width / 2 + projectile.position.x;
       const screenY = this.height / 2 + projectile.position.y;
       
@@ -115,10 +136,6 @@ export class GameRenderer {
         this.ctx.beginPath();
         this.ctx.arc(screenX, screenY, 4, 0, Math.PI * 2);
         this.ctx.fill();
-        
-        // Reset shadow
-        this.ctx.shadowColor = 'transparent';
-        this.ctx.shadowBlur = 0;
       } else if (projectile.type === 'grenade') {
         // Render grenade
         this.ctx.fillStyle = '#4a4a4a';
@@ -141,9 +158,10 @@ export class GameRenderer {
           this.ctx.beginPath();
           this.ctx.arc(screenX, screenY, projectile.explosionRadius || 60, 0, Math.PI * 2);
           this.ctx.stroke();
-          this.ctx.globalAlpha = 1.0;
         }
       }
+      
+      this.ctx.restore();
     });
   }
 
@@ -171,6 +189,8 @@ export class GameRenderer {
 
   private renderAbilityIcon(x: number, y: number, size: number, color: string, text: string, 
                           cooldown: number, maxCooldown: number): void {
+    this.ctx.save();
+    
     const isOnCooldown = cooldown > 0;
     const alpha = isOnCooldown ? 0.3 : 1.0;
     
@@ -200,6 +220,8 @@ export class GameRenderer {
     this.ctx.textAlign = 'center';
     this.ctx.textBaseline = 'middle';
     this.ctx.fillText(text, x, y);
+    
+    this.ctx.restore();
   }
 
   private renderControls(): void {
@@ -234,5 +256,93 @@ export class GameRenderer {
     if (gameState.gamePhase === 'playing') {
       this.ctx.fillText(`Time: ${Math.ceil(gameState.roundTimer / 1000)}s`, 10, 70);
     }
+  }
+
+  private renderPlayerHotbar(player: Player): void {
+    const hotbarHeight = 60;
+    const hotbarY = this.height - hotbarHeight;
+    const iconSize = 24;
+    const spacing = 60;
+    const centerX = this.width / 2;
+    
+    // Background for hotbar
+    this.ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+    this.ctx.fillRect(0, hotbarY, this.width, hotbarHeight);
+    
+    // Hotbar border
+    this.ctx.strokeStyle = '#444';
+    this.ctx.lineWidth = 2;
+    this.ctx.strokeRect(0, hotbarY, this.width, hotbarHeight);
+    
+    const iconY = hotbarY + hotbarHeight / 2;
+    
+    // Q - Fireball
+    this.renderHotbarAbility(centerX - spacing * 1.5, iconY, iconSize, '#FF4500', 'Q', 
+      player.abilities.fireball.cooldown, player.abilities.fireball.maxCooldown);
+    
+    // E - Shield
+    this.renderHotbarAbility(centerX - spacing * 0.5, iconY, iconSize, '#00BFFF', 'E', 
+      player.abilities.shield.cooldown, player.abilities.shield.maxCooldown);
+    
+    // R - Grenade
+    this.renderHotbarAbility(centerX + spacing * 0.5, iconY, iconSize, '#4a4a4a', 'R', 
+      player.abilities.grenade.cooldown, player.abilities.grenade.maxCooldown);
+    
+    // Space - Dash
+    this.renderHotbarAbility(centerX + spacing * 1.5, iconY, iconSize, '#32CD32', 'SPACE', 
+      player.abilities.dash.cooldown, player.abilities.dash.maxCooldown);
+  }
+
+  private renderHotbarAbility(x: number, y: number, size: number, color: string, text: string, 
+                             cooldown: number, maxCooldown: number): void {
+    this.ctx.save();
+    
+    const isOnCooldown = cooldown > 0;
+    const alpha = isOnCooldown ? 0.4 : 1.0;
+    
+    // Background circle
+    this.ctx.globalAlpha = alpha;
+    this.ctx.fillStyle = color;
+    this.ctx.beginPath();
+    this.ctx.arc(x, y, size / 2, 0, Math.PI * 2);
+    this.ctx.fill();
+    
+    // White border for ability slot
+    this.ctx.globalAlpha = 1.0;
+    this.ctx.strokeStyle = '#fff';
+    this.ctx.lineWidth = 2;
+    this.ctx.beginPath();
+    this.ctx.arc(x, y, size / 2, 0, Math.PI * 2);
+    this.ctx.stroke();
+    
+    // Cooldown overlay (pie chart style)
+    if (isOnCooldown) {
+      const cooldownPercent = cooldown / maxCooldown;
+      this.ctx.globalAlpha = 0.8;
+      this.ctx.fillStyle = '#000';
+      this.ctx.beginPath();
+      this.ctx.moveTo(x, y);
+      this.ctx.arc(x, y, size / 2, -Math.PI / 2, -Math.PI / 2 + (Math.PI * 2 * cooldownPercent));
+      this.ctx.closePath();
+      this.ctx.fill();
+      
+      // Cooldown timer text
+      this.ctx.globalAlpha = 1.0;
+      this.ctx.fillStyle = '#fff';
+      this.ctx.font = 'bold 10px Arial';
+      this.ctx.textAlign = 'center';
+      this.ctx.textBaseline = 'middle';
+      this.ctx.fillText(Math.ceil(cooldown / 1000).toString(), x, y);
+    } else {
+      // Key binding text
+      this.ctx.globalAlpha = 1.0;
+      this.ctx.fillStyle = '#fff';
+      this.ctx.font = text === 'SPACE' ? 'bold 8px Arial' : 'bold 12px Arial';
+      this.ctx.textAlign = 'center';
+      this.ctx.textBaseline = 'middle';
+      this.ctx.fillText(text, x, y);
+    }
+    
+    this.ctx.restore();
   }
 }
