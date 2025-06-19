@@ -46,6 +46,39 @@ export interface GameState {
   gamePhase: 'waiting' | 'countdown' | 'playing' | 'ended';
 }
 
+export type GameMode = '1v1' | '2v2' | '3v3';
+
+export interface QueueRequest {
+  gameMode: GameMode;
+  playerName: string;
+}
+
+export interface Lobby {
+  id: string;
+  gameMode: GameMode;
+  players: LobbyPlayer[];
+  maxPlayers: number;
+  status: 'waiting' | 'full' | 'starting' | 'in_game';
+  createdAt: number;
+}
+
+export interface LobbyPlayer {
+  id: string;
+  name: string;
+  ready: boolean;
+}
+
+export interface ClientState {
+  screen: 'menu' | 'queue' | 'lobby' | 'game';
+  queueData?: {
+    gameMode: GameMode;
+    estimatedWait: number;
+    playersInQueue: number;
+  };
+  lobbyData?: Lobby;
+  gameData?: GameState;
+}
+
 export interface InputState {
   up: boolean;
   down: boolean;
@@ -59,13 +92,21 @@ export interface InputState {
 
 export interface ClientToServerEvents {
   playerInput: (input: InputState) => void;
-  joinGame: (playerName: string) => void;
+  joinQueue: (request: QueueRequest) => void;
+  leaveQueue: () => void;
+  readyUp: () => void;
+  leaveLobby: () => void;
 }
 
 export interface ServerToClientEvents {
+  clientStateUpdate: (state: ClientState) => void;
+  queueJoined: (queueData: { gameMode: GameMode; estimatedWait: number; playersInQueue: number }) => void;
+  queueLeft: () => void;
+  queueUpdate: (queueData: { estimatedWait: number; playersInQueue: number }) => void;
+  lobbyJoined: (lobby: Lobby) => void;
+  lobbyUpdate: (lobby: Lobby) => void;
+  gameStarting: (countdown: number) => void;
   gameState: (state: GameState) => void;
-  playerJoined: (playerId: string) => void;
-  playerLeft: (playerId: string) => void;
-  gameStarted: () => void;
   gameEnded: (winner: string) => void;
+  error: (message: string) => void;
 }
