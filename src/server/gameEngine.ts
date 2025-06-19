@@ -1,14 +1,19 @@
-import { GameState, Player, InputState, Vector2 } from '../shared/types';
+import { GameState, Player, InputState, Vector2, Projectile } from '../shared/types';
 
 export class GameEngine {
   private gameState: GameState;
   private readonly ARENA_RADIUS = 300;
   private readonly PLAYER_SPEED = 200;
   private readonly PLAYER_RADIUS = 20;
+  private readonly DASH_SPEED = 400;
+  private readonly DASH_DISTANCE = 100;
+  private readonly TELEPORT_DISTANCE = 150;
+  private projectiles: Projectile[] = [];
 
   constructor() {
     this.gameState = {
       players: {},
+      projectiles: [],
       arena: {
         width: 600,
         height: 600,
@@ -41,6 +46,12 @@ export class GameEngine {
       radius: this.PLAYER_RADIUS,
       color: colors[playerCount % colors.length],
       team: playerCount < 3 ? 1 : 2,
+      abilities: {
+        fireball: { cooldown: 0, maxCooldown: 1000 },
+        shield: { cooldown: 0, maxCooldown: 5000, active: false, duration: 0 },
+        grenade: { cooldown: 0, maxCooldown: 4000 },
+        dash: { cooldown: 0, maxCooldown: 1500 },
+      },
     };
 
     this.gameState.players[id] = player;
@@ -64,7 +75,12 @@ export class GameEngine {
     }
 
     this.updatePlayers(deltaTime, playerInputs);
+    this.updateProjectiles(deltaTime);
+    this.updateAbilityCooldowns(deltaTime);
     this.updateTimer(deltaTime);
+    
+    // Update game state projectiles
+    this.gameState.projectiles = [...this.projectiles];
   }
 
   private updatePlayers(deltaTime: number, playerInputs: Map<string, InputState>): void {
@@ -73,6 +89,7 @@ export class GameEngine {
       if (!input) return;
 
       this.updatePlayerMovement(player, input, deltaTime);
+      this.handlePlayerAbilities(player, input, deltaTime);
       this.constrainPlayerToArena(player);
     });
   }
@@ -120,6 +137,237 @@ export class GameEngine {
       this.gameState.gamePhase = 'ended';
     }
   }
+
+  private handlePlayerAbilities(player: Player, input: InputState, deltaTime: number): void {
+    // Q - Fireball
+    if (input.ability1 && player.abilities.fireball.cooldown <= 0) {
+      this.castFireball(player);
+      player.abilities.fireball.cooldown = player.abilities.fireball.maxCooldown;
+    }
+
+    // E - Shield
+    if (input.ability2 && player.abilities.shield.cooldown <= 0) {
+      this.activateShield(player);
+      player.abilities.shield.cooldown = player.abilities.shield.maxCooldown;
+    }
+
+    // R - Grenade
+    if (input.ultimate && player.abilities.grenade.cooldown <= 0) {
+      this.throwGrenade(player, input);
+      player.abilities.grenade.cooldown = player.abilities.grenade.maxCooldown;
+    }
+
+    // Space - Dash
+    if (input.dash && player.abilities.dash.cooldown <= 0) {
+      this.dashPlayer(player, input);
+      player.abilities.dash.cooldown = player.abilities.dash.maxCooldown;
+    }
+
+    // Update shield duration
+    if (player.abilities.shield.active) {
+      player.abilities.shield.duration -= deltaTime;
+      if (player.abilities.shield.duration <= 0) {
+        player.abilities.shield.active = false;
+      }
+    }
+  }
+
+  private castFireball(player: Player): void {
+    // Calculate direction based on movement or default forward
+    let direction = { x: 1, y: 0 };
+    if (player.velocity.x !== 0 || player.velocity.y !== 0) {
+      const magnitude = Math.sqrt(player.velocity.x ** 2 + player.velocity.y ** 2);
+      direction.x = player.velocity.x / magnitude;
+      direction.y = player.velocity.y / magnitude;
+    }
+
+    const fireball: Projectile = {
+      id: `fireball_${Date.now()}_${Math.random()}`,
+      playerId: player.id,
+      position: {
+        x: player.position.x + direction.x * (player.radius + 5),
+        y: player.position.y + direction.y * (player.radius + 5),
+      },
+      velocity: {
+        x: direction.x * 300,
+        y: direction.y * 300,
+      },
+      lifetime: 2000,
+      type: 'fireball',
+    };
+
+    this.projectiles.push(fireball);
+  }
+
+  private activateShield(player: Player): void {
+    player.abilities.shield.active = true;
+    player.abilities.shield.duration = 3000; // 3 seconds
+  }
+
+  private throwGrenade(player: Player, input: InputState): void {
+    // Calculate direction based on movement input or default forward
+    let direction = { x: 0, y: 0 };
+    
+    if (input.up) direction.y -= 1;
+    if (input.down) direction.y += 1;
+    if (input.left) direction.x -= 1;
+    if (input.right) direction.x += 1;
+
+    // If no direction, throw forward
+    if (direction.x === 0 && direction.y === 0) {
+      direction.x = 1;
+    }
+
+    // Normalize direction
+    const magnitude = Math.sqrt(direction.x ** 2 + direction.y ** 2);
+    if (magnitude > 0) {
+      direction.x /= magnitude;
+      direction.y /= magnitude;
+    }
+
+    const grenade: Projectile = {
+      id: `grenade_${Date.now()}_${Math.random()}`,
+      playerId: player.id,
+      position: {
+        x: player.position.x + direction.x * (player.radius + 5),
+        y: player.position.y + direction.y * (player.radius + 5),
+      },
+      velocity: {
+        x: direction.x * 150, // Slower than fireball
+        y: direction.y * 150,
+      },
+      lifetime: 5000, // 5 seconds max lifetime
+      type: 'grenade',
+      explosionTimer: 2000, // 2 seconds until explosion
+      explosionRadius: 60, // Explosion radius
+    };
+
+    this.projectiles.push(grenade);
+  }
+
+  private dashPlayer(player: Player, input: InputState): void {
+    let direction = { x: 0, y: 0 };
+    
+    if (input.up) direction.y -= 1;
+    if (input.down) direction.y += 1;
+    if (input.left) direction.x -= 1;
+    if (input.right) direction.x += 1;
+
+    // If no direction, dash forward
+    if (direction.x === 0 && direction.y === 0) {
+      direction.x = 1;
+    }
+
+    // Normalize direction
+    const magnitude = Math.sqrt(direction.x ** 2 + direction.y ** 2);
+    if (magnitude > 0) {
+      direction.x /= magnitude;
+      direction.y /= magnitude;
+    }
+
+    const newPosition = {
+      x: player.position.x + direction.x * this.DASH_DISTANCE,
+      y: player.position.y + direction.y * this.DASH_DISTANCE,
+    };
+
+    // Check if new position is within arena
+    const distanceFromCenter = Math.sqrt(newPosition.x ** 2 + newPosition.y ** 2);
+    const maxDistance = this.ARENA_RADIUS - player.radius;
+    
+    if (distanceFromCenter <= maxDistance) {
+      player.position = newPosition;
+    } else {
+      // Dash to the edge of the arena in that direction
+      const angle = Math.atan2(newPosition.y, newPosition.x);
+      player.position.x = Math.cos(angle) * maxDistance;
+      player.position.y = Math.sin(angle) * maxDistance;
+    }
+  }
+
+  private updateProjectiles(deltaTime: number): void {
+    this.projectiles = this.projectiles.filter(projectile => {
+      // Update position
+      projectile.position.x += projectile.velocity.x * (deltaTime / 1000);
+      projectile.position.y += projectile.velocity.y * (deltaTime / 1000);
+      
+      // Update lifetime
+      projectile.lifetime -= deltaTime;
+      
+      // Remove if expired or out of bounds
+      const distanceFromCenter = Math.sqrt(projectile.position.x ** 2 + projectile.position.y ** 2);
+      if (projectile.lifetime <= 0 || distanceFromCenter > this.ARENA_RADIUS) {
+        return false;
+      }
+
+      // Check collision with players
+      Object.values(this.gameState.players).forEach(player => {
+        if (player.id !== projectile.playerId) {
+          const distance = Math.sqrt(
+            (player.position.x - projectile.position.x) ** 2 + 
+            (player.position.y - projectile.position.y) ** 2
+          );
+          
+          if (projectile.type === 'fireball' && distance < player.radius + 10) {
+            // Fireball direct hit
+            if (!player.abilities.shield.active) {
+              player.health -= 20;
+              if (player.health < 0) player.health = 0;
+            }
+            // Remove projectile
+            projectile.lifetime = 0;
+          }
+          // Grenades don't do direct hit damage - they explode after timer
+        }
+      });
+
+      // Handle grenade explosions
+      if (projectile.type === 'grenade' && projectile.explosionTimer !== undefined) {
+        projectile.explosionTimer -= deltaTime;
+        
+        if (projectile.explosionTimer <= 0) {
+          // Explode!
+          this.explodeGrenade(projectile);
+          projectile.lifetime = 0; // Remove after explosion
+        }
+      }
+
+      return projectile.lifetime > 0;
+    });
+  }
+
+  private explodeGrenade(grenade: Projectile): void {
+    if (!grenade.explosionRadius) return;
+    
+    // Damage all players within explosion radius
+    Object.values(this.gameState.players).forEach(player => {
+      if (player.id !== grenade.playerId) {
+        const distance = Math.sqrt(
+          (player.position.x - grenade.position.x) ** 2 + 
+          (player.position.y - grenade.position.y) ** 2
+        );
+        
+        if (distance <= grenade.explosionRadius!) {
+          if (!player.abilities.shield.active) {
+            // Damage decreases with distance from explosion center
+            const damageMultiplier = 1 - (distance / grenade.explosionRadius!);
+            const damage = Math.ceil(35 * damageMultiplier); // Max 35 damage at center
+            player.health -= damage;
+            if (player.health < 0) player.health = 0;
+          }
+        }
+      }
+    });
+  }
+
+  private updateAbilityCooldowns(deltaTime: number): void {
+    Object.values(this.gameState.players).forEach(player => {
+      player.abilities.fireball.cooldown = Math.max(0, player.abilities.fireball.cooldown - deltaTime);
+      player.abilities.shield.cooldown = Math.max(0, player.abilities.shield.cooldown - deltaTime);
+      player.abilities.grenade.cooldown = Math.max(0, player.abilities.grenade.cooldown - deltaTime);
+      player.abilities.dash.cooldown = Math.max(0, player.abilities.dash.cooldown - deltaTime);
+    });
+  }
+
 
   getGameState(): GameState {
     return { ...this.gameState };

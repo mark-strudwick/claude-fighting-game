@@ -12,10 +12,28 @@ export interface Player {
   radius: number;
   color: string;
   team: number;
+  abilities: {
+    fireball: { cooldown: number; maxCooldown: number };
+    shield: { cooldown: number; maxCooldown: number; active: boolean; duration: number };
+    grenade: { cooldown: number; maxCooldown: number };
+    dash: { cooldown: number; maxCooldown: number };
+  };
+}
+
+export interface Projectile {
+  id: string;
+  playerId: string;
+  position: Vector2;
+  velocity: Vector2;
+  lifetime: number;
+  type: 'fireball' | 'grenade';
+  explosionTimer?: number; // For grenades
+  explosionRadius?: number; // For grenades
 }
 
 export interface GameState {
   players: { [id: string]: Player };
+  projectiles: Projectile[];
   arena: {
     width: number;
     height: number;
@@ -33,10 +51,10 @@ export interface InputState {
   down: boolean;
   left: boolean;
   right: boolean;
-  attack: boolean;
-  ability1: boolean;
-  ability2: boolean;
-  ultimate: boolean;
+  dash: boolean;      // Space - dash ability
+  ability1: boolean;  // Q - fireball
+  ability2: boolean;  // E - shield
+  ultimate: boolean;  // R - grenade
 }
 
 export interface ClientToServerEvents {
