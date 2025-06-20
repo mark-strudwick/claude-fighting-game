@@ -27,6 +27,7 @@ class GameClient {
     this.canvas = document.getElementById('gameCanvas') as HTMLCanvasElement;
     this.ctx = this.canvas.getContext('2d')!;
     
+    this.setupCanvasSize();
     this.renderer = new GameRenderer(this.ctx, this.canvas.width, this.canvas.height);
     this.inputManager = new InputManager();
     
@@ -34,6 +35,32 @@ class GameClient {
     this.setupSocketListeners();
     this.setupUIListeners();
     this.startGameLoop();
+    
+    window.addEventListener('resize', () => this.handleResize());
+  }
+
+  private setupCanvasSize(): void {
+    const maxWidth = window.innerWidth - 40;
+    const maxHeight = window.innerHeight * 0.9;
+    
+    const aspectRatio = 1200 / 800;
+    let canvasWidth = Math.min(maxWidth, maxHeight * aspectRatio);
+    let canvasHeight = canvasWidth / aspectRatio;
+    
+    if (canvasHeight > maxHeight) {
+      canvasHeight = maxHeight;
+      canvasWidth = canvasHeight * aspectRatio;
+    }
+    
+    this.canvas.width = canvasWidth;
+    this.canvas.height = canvasHeight;
+  }
+
+  private handleResize(): void {
+    this.setupCanvasSize();
+    if (this.renderer) {
+      this.renderer.updateDimensions(this.canvas.width, this.canvas.height);
+    }
   }
 
   private setupSocketListeners(): void {
@@ -74,9 +101,12 @@ class GameClient {
       this.gameState = state;
     });
 
-    this.socket.on('gameEnded', (winner: string) => {
-      console.log(`Game ended! Winner: ${winner}`);
-      // TODO: Show game over screen
+    this.socket.on('roundEnded', (winningTeam: number, scores: { [team: number]: number }) => {
+      this.showRoundEndMessage(winningTeam, scores);
+    });
+
+    this.socket.on('gameEnded', (winningTeam: number, finalScores: { [team: number]: number }) => {
+      this.showGameEndMessage(winningTeam, finalScores);
     });
 
     this.socket.on('error', (message: string) => {
@@ -222,6 +252,86 @@ class GameClient {
   private showGameStartingCountdown(countdown: number): void {
     // TODO: Implement countdown overlay
     console.log(`Game starting in ${countdown} seconds`);
+  }
+
+  private showRoundEndMessage(winningTeam: number, scores: { [team: number]: number }): void {
+    const teamColor = winningTeam === 1 ? '#FF6B6B' : '#4ECDC4';
+    const message = `Team ${winningTeam} wins the round! Score: ${scores[1]} - ${scores[2]}`;
+    
+    // Create overlay
+    const overlay = document.createElement('div');
+    overlay.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.8);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      z-index: 1000;
+      color: ${teamColor};
+      font-size: 48px;
+      font-weight: bold;
+      text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.8);
+    `;
+    
+    overlay.innerHTML = `
+      <div>ROUND OVER</div>
+      <div style="font-size: 32px; margin: 20px 0;">${message}</div>
+      <div style="font-size: 24px; color: #fff;">Next round starting soon...</div>
+    `;
+    
+    document.body.appendChild(overlay);
+    
+    // Remove overlay after 3 seconds
+    setTimeout(() => {
+      document.body.removeChild(overlay);
+    }, 3000);
+  }
+
+  private showGameEndMessage(winningTeam: number, finalScores: { [team: number]: number }): void {
+    const teamColor = winningTeam === 1 ? '#FF6B6B' : '#4ECDC4';
+    const message = `Team ${winningTeam} wins the game!`;
+    const finalScore = `Final Score: ${finalScores[1]} - ${finalScores[2]}`;
+    
+    // Create overlay
+    const overlay = document.createElement('div');
+    overlay.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.9);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      z-index: 1000;
+      color: ${teamColor};
+      font-size: 64px;
+      font-weight: bold;
+      text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.8);
+    `;
+    
+    overlay.innerHTML = `
+      <div>🏆 VICTORY! 🏆</div>
+      <div style="font-size: 48px; margin: 20px 0; color: ${teamColor};">${message}</div>
+      <div style="font-size: 32px; color: #fff; margin: 10px 0;">${finalScore}</div>
+      <div style="font-size: 24px; color: #888; margin-top: 40px;">Returning to menu...</div>
+    `;
+    
+    document.body.appendChild(overlay);
+    
+    // Remove overlay after 5 seconds (client should already be back at menu by then)
+    setTimeout(() => {
+      if (document.body.contains(overlay)) {
+        document.body.removeChild(overlay);
+      }
+    }, 5000);
   }
 
   private startGameLoop(): void {

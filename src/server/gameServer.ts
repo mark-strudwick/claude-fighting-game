@@ -132,6 +132,7 @@ export class GameServer {
         const socket = this.io.sockets.sockets.get(playerId);
         if (socket) {
           socket.emit('queueUpdate', {
+            gameMode: gameMode as any,
             estimatedWait: queueInfo.estimatedWait,
             playersInQueue: queueInfo.playersInQueue
           });
@@ -216,8 +217,37 @@ export class GameServer {
       }
 
       // Update game
-      gameEngine.update(TICK_INTERVAL, lobbyInputs);
+      const events = gameEngine.update(TICK_INTERVAL, lobbyInputs);
       const gameState = gameEngine.getGameState();
+
+      // Handle game events
+      if (events.roundEnded) {
+        for (const player of lobby.players) {
+          const socket = this.io.sockets.sockets.get(player.id);
+          if (socket) {
+            socket.emit('roundEnded', events.roundEnded.winningTeam, events.roundEnded.scores);
+          }
+        }
+      }
+
+      if (events.gameEnded) {
+        for (const player of lobby.players) {
+          const socket = this.io.sockets.sockets.get(player.id);
+          if (socket) {
+            socket.emit('gameEnded', events.gameEnded.winningTeam, events.gameEnded.finalScores);
+            
+            // Return player to menu
+            const newState: ClientState = { screen: 'menu' };
+            this.playerStates.set(player.id, newState);
+            socket.emit('clientStateUpdate', newState);
+          }
+        }
+        
+        // End the game loop
+        clearInterval(gameLoop);
+        this.activeGames.delete(lobbyId);
+        return;
+      }
 
       // Broadcast to players in this lobby only
       for (const player of lobby.players) {

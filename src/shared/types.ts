@@ -7,6 +7,7 @@ export interface Player {
   id: string;
   position: Vector2;
   velocity: Vector2;
+  facingDirection: Vector2;
   health: number;
   maxHealth: number;
   radius: number;
@@ -43,7 +44,14 @@ export interface GameState {
   };
   gameMode: '1v1' | '2v2' | '3v3';
   roundTimer: number;
-  gamePhase: 'waiting' | 'countdown' | 'playing' | 'ended';
+  gamePhase: 'waiting' | 'countdown' | 'playing' | 'round_ended' | 'game_ended';
+  countdownTimer: number;
+  currentRound: number;
+  teamScores: { [team: number]: number };
+  holdingAreas: {
+    team1: { x: number; y: number; radius: number };
+    team2: { x: number; y: number; radius: number };
+  };
 }
 
 export type GameMode = '1v1' | '2v2' | '3v3';
@@ -98,15 +106,21 @@ export interface ClientToServerEvents {
   leaveLobby: () => void;
 }
 
+export interface GameEvents {
+  roundEnded: { winningTeam: number; scores: { [team: number]: number } } | null;
+  gameEnded: { winningTeam: number; finalScores: { [team: number]: number } } | null;
+}
+
 export interface ServerToClientEvents {
   clientStateUpdate: (state: ClientState) => void;
   queueJoined: (queueData: { gameMode: GameMode; estimatedWait: number; playersInQueue: number }) => void;
   queueLeft: () => void;
-  queueUpdate: (queueData: { estimatedWait: number; playersInQueue: number }) => void;
+  queueUpdate: (queueData: { gameMode: GameMode; estimatedWait: number; playersInQueue: number }) => void;
   lobbyJoined: (lobby: Lobby) => void;
   lobbyUpdate: (lobby: Lobby) => void;
   gameStarting: (countdown: number) => void;
   gameState: (state: GameState) => void;
-  gameEnded: (winner: string) => void;
+  roundEnded: (winningTeam: number, scores: { [team: number]: number }) => void;
+  gameEnded: (winningTeam: number, finalScores: { [team: number]: number }) => void;
   error: (message: string) => void;
 }

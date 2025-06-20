@@ -11,6 +11,11 @@ export class GameRenderer {
     this.height = height;
   }
 
+  updateDimensions(width: number, height: number): void {
+    this.width = width;
+    this.height = height;
+  }
+
   render(gameState: GameState, currentPlayerId?: string | null): void {
     // Save initial canvas state
     this.ctx.save();
@@ -21,6 +26,7 @@ export class GameRenderer {
     this.ctx.shadowBlur = 0;
     
     this.renderArena(gameState.arena);
+    this.renderHoldingAreas(gameState);
     this.renderPlayers(gameState.players, currentPlayerId);
     this.renderProjectiles(gameState.projectiles);
     this.renderUI(gameState);
@@ -58,6 +64,45 @@ export class GameRenderer {
     this.ctx.beginPath();
     this.ctx.arc(centerX, centerY, arena.radius, 0, Math.PI * 2);
     this.ctx.fill();
+  }
+
+  private renderHoldingAreas(gameState: GameState): void {
+    const centerX = this.width / 2;
+    const centerY = this.height / 2;
+    
+    // Team 1 holding area (left side)
+    const team1X = centerX + gameState.holdingAreas.team1.x;
+    const team1Y = centerY + gameState.holdingAreas.team1.y;
+    
+    this.ctx.strokeStyle = '#FF6B6B';
+    this.ctx.lineWidth = 2;
+    this.ctx.setLineDash([5, 5]);
+    this.ctx.beginPath();
+    this.ctx.arc(team1X, team1Y, gameState.holdingAreas.team1.radius, 0, Math.PI * 2);
+    this.ctx.stroke();
+    
+    // Team 2 holding area (right side)
+    const team2X = centerX + gameState.holdingAreas.team2.x;
+    const team2Y = centerY + gameState.holdingAreas.team2.y;
+    
+    this.ctx.strokeStyle = '#4ECDC4';
+    this.ctx.lineWidth = 2;
+    this.ctx.setLineDash([5, 5]);
+    this.ctx.beginPath();
+    this.ctx.arc(team2X, team2Y, gameState.holdingAreas.team2.radius, 0, Math.PI * 2);
+    this.ctx.stroke();
+    
+    // Reset line dash
+    this.ctx.setLineDash([]);
+    
+    // Team labels
+    this.ctx.fillStyle = '#FF6B6B';
+    this.ctx.font = '14px Arial';
+    this.ctx.textAlign = 'center';
+    this.ctx.fillText('Team 1', team1X, team1Y - gameState.holdingAreas.team1.radius - 10);
+    
+    this.ctx.fillStyle = '#4ECDC4';
+    this.ctx.fillText('Team 2', team2X, team2Y - gameState.holdingAreas.team2.radius - 10);
   }
 
   private renderPlayers(players: { [id: string]: Player }, currentPlayerId?: string | null): void {
@@ -251,11 +296,59 @@ export class GameRenderer {
     this.ctx.textAlign = 'left';
     
     this.ctx.fillText(`Game Mode: ${gameState.gameMode}`, 10, 30);
-    this.ctx.fillText(`Phase: ${gameState.gamePhase}`, 10, 50);
+    this.ctx.fillText(`Round: ${gameState.currentRound}`, 10, 50);
     
     if (gameState.gamePhase === 'playing') {
       this.ctx.fillText(`Time: ${Math.ceil(gameState.roundTimer / 1000)}s`, 10, 70);
     }
+    
+    // Render countdown
+    if (gameState.gamePhase === 'countdown') {
+      const countdownSeconds = Math.ceil(gameState.countdownTimer / 1000);
+      this.ctx.save();
+      this.ctx.fillStyle = '#FFD700';
+      this.ctx.font = 'bold 72px Arial';
+      this.ctx.textAlign = 'center';
+      this.ctx.textBaseline = 'middle';
+      this.ctx.fillText(countdownSeconds.toString(), this.width / 2, this.height / 2);
+      
+      this.ctx.font = 'bold 24px Arial';
+      this.ctx.fillText('GET READY!', this.width / 2, this.height / 2 + 80);
+      this.ctx.restore();
+    }
+    
+    // Render scores
+    this.renderScores(gameState);
+  }
+
+  private renderScores(gameState: GameState): void {
+    const scoreX = this.width / 2;
+    const scoreY = 30;
+    
+    this.ctx.save();
+    this.ctx.font = 'bold 24px Arial';
+    this.ctx.textAlign = 'center';
+    
+    // Team 1 score
+    this.ctx.fillStyle = '#FF6B6B';
+    this.ctx.fillText(gameState.teamScores[1].toString(), scoreX - 50, scoreY);
+    
+    // VS
+    this.ctx.fillStyle = '#fff';
+    this.ctx.font = '16px Arial';
+    this.ctx.fillText('VS', scoreX, scoreY);
+    
+    // Team 2 score
+    this.ctx.fillStyle = '#4ECDC4';
+    this.ctx.font = 'bold 24px Arial';
+    this.ctx.fillText(gameState.teamScores[2].toString(), scoreX + 50, scoreY);
+    
+    // First to 3 indicator
+    this.ctx.fillStyle = '#888';
+    this.ctx.font = '12px Arial';
+    this.ctx.fillText('First to 3', scoreX, scoreY + 20);
+    
+    this.ctx.restore();
   }
 
   private renderPlayerHotbar(player: Player): void {

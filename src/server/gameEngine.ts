@@ -1,4 +1,4 @@
-import { GameState, Player, InputState, Vector2, Projectile } from '../shared/types';
+import { GameState, Player, InputState, Vector2, Projectile, GameEvents } from '../shared/types';
 
 export class GameEngine {
   private gameState: GameState;
@@ -24,6 +24,13 @@ export class GameEngine {
       gameMode: '1v1',
       roundTimer: 90000,
       gamePhase: 'waiting',
+      countdownTimer: 3000,
+      currentRound: 1,
+      teamScores: { 1: 0, 2: 0 },
+      holdingAreas: {
+        team1: { x: -200, y: 0, radius: 80 },
+        team2: { x: 200, y: 0, radius: 80 }
+      }
     };
   }
 
@@ -31,21 +38,28 @@ export class GameEngine {
     const colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8', '#F7DC6F'];
     const playerCount = Object.keys(this.gameState.players).length;
     
-    const angle = (playerCount * Math.PI * 2) / 6;
-    const spawnRadius = this.ARENA_RADIUS * 0.7;
+    // Assign teams alternately: first player to team 1, second to team 2, etc.
+    const team = (playerCount % 2) + 1;
+    const holdingArea = team === 1 ? this.gameState.holdingAreas.team1 : this.gameState.holdingAreas.team2;
+    
+    // Spawn players in holding areas initially
+    const teamPlayerCount = Object.values(this.gameState.players).filter(p => p.team === team).length;
+    const angle = (teamPlayerCount * Math.PI * 2) / 3; // Max 3 players per team
+    const spawnRadius = holdingArea.radius * 0.5; // Further from center to avoid overlap
     
     const player: Player = {
       id,
       position: {
-        x: Math.cos(angle) * spawnRadius,
-        y: Math.sin(angle) * spawnRadius,
+        x: holdingArea.x + Math.cos(angle) * spawnRadius,
+        y: holdingArea.y + Math.sin(angle) * spawnRadius,
       },
       velocity: { x: 0, y: 0 },
+      facingDirection: { x: team === 1 ? 1 : -1, y: 0 },
       health: 100,
       maxHealth: 100,
       radius: this.PLAYER_RADIUS,
       color: colors[playerCount % colors.length],
-      team: playerCount < 3 ? 1 : 2,
+      team: team,
       abilities: {
         fireball: { cooldown: 0, maxCooldown: 1000 },
         shield: { cooldown: 0, maxCooldown: 5000, active: false, duration: 0 },
@@ -57,7 +71,8 @@ export class GameEngine {
     this.gameState.players[id] = player;
     
     if (Object.keys(this.gameState.players).length >= 2) {
-      this.gameState.gamePhase = 'playing';
+      this.gameState.gamePhase = 'countdown';
+      this.gameState.countdownTimer = 3000;
     }
   }
 
@@ -69,18 +84,37 @@ export class GameEngine {
     }
   }
 
-  update(deltaTime: number, playerInputs: Map<string, InputState>): void {
-    if (this.gameState.gamePhase !== 'playing') {
-      return;
-    }
+  update(deltaTime: number, playerInputs: Map<string, InputState>): GameEvents {
+    const events: GameEvents = {
+      roundEnded: null,
+      gameEnded: null
+    };
 
-    this.updatePlayers(deltaTime, playerInputs);
-    this.updateProjectiles(deltaTime);
-    this.updateAbilityCooldowns(deltaTime);
-    this.updateTimer(deltaTime);
+    if (this.gameState.gamePhase === 'countdown') {
+      this.updateCountdown(deltaTime);
+    } else if (this.gameState.gamePhase === 'playing') {
+      this.updatePlayers(deltaTime, playerInputs);
+      this.updateProjectiles(deltaTime);
+      this.updateAbilityCooldowns(deltaTime);
+      this.updateTimer(deltaTime);
+      
+      // Check for round end conditions
+      const roundResult = this.checkRoundEnd();
+      if (roundResult) {
+        events.roundEnded = roundResult;
+        
+        // Check if game should end
+        const gameResult = this.checkGameEnd();
+        if (gameResult) {
+          events.gameEnded = gameResult;
+        }
+      }
+    }
     
     // Update game state projectiles
     this.gameState.projectiles = [...this.projectiles];
+    
+    return events;
   }
 
   private updatePlayers(deltaTime: number, playerInputs: Map<string, InputState>): void {
@@ -90,8 +124,108 @@ export class GameEngine {
 
       this.updatePlayerMovement(player, input, deltaTime);
       this.handlePlayerAbilities(player, input, deltaTime);
-      this.constrainPlayerToArena(player);
+      
+      if (this.gameState.gamePhase === 'countdown') {
+        this.constrainPlayerToHoldingArea(player);
+      } else {
+        this.constrainPlayerToArena(player);
+      }
     });
+  }
+
+  private updateCountdown(deltaTime: number): void {
+    this.gameState.countdownTimer -= deltaTime;
+    
+    if (this.gameState.countdownTimer <= 0) {
+      this.gameState.gamePhase = 'playing';
+      this.gameState.roundTimer = 90000; // Reset round timer
+    }
+  }
+
+  private constrainPlayerToHoldingArea(player: Player): void {
+    const holdingArea = player.team === 1 ? this.gameState.holdingAreas.team1 : this.gameState.holdingAreas.team2;
+    
+    const dx = player.position.x - holdingArea.x;
+    const dy = player.position.y - holdingArea.y;
+    const distanceFromCenter = Math.sqrt(dx * dx + dy * dy);
+    
+    const maxDistance = holdingArea.radius - player.radius;
+    
+    if (distanceFromCenter > maxDistance) {
+      const angle = Math.atan2(dy, dx);
+      player.position.x = holdingArea.x + Math.cos(angle) * maxDistance;
+      player.position.y = holdingArea.y + Math.sin(angle) * maxDistance;
+    }
+  }
+
+  private checkRoundEnd(): { winningTeam: number; scores: { [team: number]: number } } | null {
+    const team1Players = Object.values(this.gameState.players).filter(p => p.team === 1);
+    const team2Players = Object.values(this.gameState.players).filter(p => p.team === 2);
+    
+    // Only check for round end if we have players from both teams
+    if (team1Players.length === 0 || team2Players.length === 0) {
+      return null;
+    }
+    
+    const team1Alive = team1Players.some(p => p.health > 0);
+    const team2Alive = team2Players.some(p => p.health > 0);
+    
+    // Only end round if one team is completely eliminated
+    if (!team1Alive && team2Alive) {
+      this.gameState.teamScores[2]++;
+      this.startNewRound();
+      return { winningTeam: 2, scores: { ...this.gameState.teamScores } };
+    } else if (!team2Alive && team1Alive) {
+      this.gameState.teamScores[1]++;
+      this.startNewRound();
+      return { winningTeam: 1, scores: { ...this.gameState.teamScores } };
+    } else if (!team1Alive && !team2Alive) {
+      // Tie round, restart without scoring
+      this.startNewRound();
+      return null;
+    }
+    
+    // Round continues if both teams have living players
+    return null;
+  }
+
+  private checkGameEnd(): { winningTeam: number; finalScores: { [team: number]: number } } | null {
+    if (this.gameState.teamScores[1] >= 3) {
+      this.gameState.gamePhase = 'game_ended';
+      return { winningTeam: 1, finalScores: { ...this.gameState.teamScores } };
+    } else if (this.gameState.teamScores[2] >= 3) {
+      this.gameState.gamePhase = 'game_ended';
+      return { winningTeam: 2, finalScores: { ...this.gameState.teamScores } };
+    }
+    
+    return null;
+  }
+
+  private startNewRound(): void {
+    this.gameState.currentRound++;
+    this.gameState.gamePhase = 'countdown';
+    this.gameState.countdownTimer = 3000;
+    this.gameState.roundTimer = 90000;
+    
+    // Reset all players to full health and move to holding areas
+    Object.values(this.gameState.players).forEach(player => {
+      player.health = player.maxHealth;
+      
+      const holdingArea = player.team === 1 ? this.gameState.holdingAreas.team1 : this.gameState.holdingAreas.team2;
+      const teamPlayers = Object.values(this.gameState.players).filter(p => p.team === player.team);
+      const playerIndex = teamPlayers.findIndex(p => p.id === player.id);
+      const angle = (playerIndex * Math.PI * 2) / 3;
+      const spawnRadius = holdingArea.radius * 0.5; // Further from center to avoid overlap
+      
+      player.position.x = holdingArea.x + Math.cos(angle) * spawnRadius;
+      player.position.y = holdingArea.y + Math.sin(angle) * spawnRadius;
+      player.velocity.x = 0;
+      player.velocity.y = 0;
+    });
+    
+    // Clear all projectiles
+    this.projectiles = [];
+    this.gameState.projectiles = [];
   }
 
   private updatePlayerMovement(player: Player, input: InputState, deltaTime: number): void {
@@ -109,6 +243,13 @@ export class GameEngine {
       const normalizer = Math.sqrt(2) / 2;
       player.velocity.x *= normalizer;
       player.velocity.y *= normalizer;
+    }
+
+    // Update facing direction when moving
+    if (player.velocity.x !== 0 || player.velocity.y !== 0) {
+      const magnitude = Math.sqrt(player.velocity.x ** 2 + player.velocity.y ** 2);
+      player.facingDirection.x = player.velocity.x / magnitude;
+      player.facingDirection.y = player.velocity.y / magnitude;
     }
 
     player.position.x += player.velocity.x;
@@ -133,8 +274,13 @@ export class GameEngine {
   private updateTimer(deltaTime: number): void {
     if (this.gameState.roundTimer > 0) {
       this.gameState.roundTimer -= deltaTime;
-    } else {
-      this.gameState.gamePhase = 'ended';
+      
+      // Check if timer just expired (avoid multiple calls)
+      if (this.gameState.roundTimer <= 0) {
+        this.gameState.roundTimer = 0;
+        // Time expired, end the round as a tie
+        this.startNewRound();
+      }
     }
   }
 
@@ -173,13 +319,8 @@ export class GameEngine {
   }
 
   private castFireball(player: Player): void {
-    // Calculate direction based on movement or default forward
-    let direction = { x: 1, y: 0 };
-    if (player.velocity.x !== 0 || player.velocity.y !== 0) {
-      const magnitude = Math.sqrt(player.velocity.x ** 2 + player.velocity.y ** 2);
-      direction.x = player.velocity.x / magnitude;
-      direction.y = player.velocity.y / magnitude;
-    }
+    // Use player's facing direction
+    const direction = { x: player.facingDirection.x, y: player.facingDirection.y };
 
     const fireball: Projectile = {
       id: `fireball_${Date.now()}_${Math.random()}`,
@@ -205,25 +346,8 @@ export class GameEngine {
   }
 
   private throwGrenade(player: Player, input: InputState): void {
-    // Calculate direction based on movement input or default forward
-    let direction = { x: 0, y: 0 };
-    
-    if (input.up) direction.y -= 1;
-    if (input.down) direction.y += 1;
-    if (input.left) direction.x -= 1;
-    if (input.right) direction.x += 1;
-
-    // If no direction, throw forward
-    if (direction.x === 0 && direction.y === 0) {
-      direction.x = 1;
-    }
-
-    // Normalize direction
-    const magnitude = Math.sqrt(direction.x ** 2 + direction.y ** 2);
-    if (magnitude > 0) {
-      direction.x /= magnitude;
-      direction.y /= magnitude;
-    }
+    // Use player's facing direction
+    const direction = { x: player.facingDirection.x, y: player.facingDirection.y };
 
     const grenade: Projectile = {
       id: `grenade_${Date.now()}_${Math.random()}`,
@@ -246,24 +370,8 @@ export class GameEngine {
   }
 
   private dashPlayer(player: Player, input: InputState): void {
-    let direction = { x: 0, y: 0 };
-    
-    if (input.up) direction.y -= 1;
-    if (input.down) direction.y += 1;
-    if (input.left) direction.x -= 1;
-    if (input.right) direction.x += 1;
-
-    // If no direction, dash forward
-    if (direction.x === 0 && direction.y === 0) {
-      direction.x = 1;
-    }
-
-    // Normalize direction
-    const magnitude = Math.sqrt(direction.x ** 2 + direction.y ** 2);
-    if (magnitude > 0) {
-      direction.x /= magnitude;
-      direction.y /= magnitude;
-    }
+    // Use player's facing direction
+    const direction = { x: player.facingDirection.x, y: player.facingDirection.y };
 
     const newPosition = {
       x: player.position.x + direction.x * this.DASH_DISTANCE,
