@@ -2,6 +2,7 @@ import { InputState } from '../shared/types';
 
 export class InputManager {
   private keys: { [key: string]: boolean } = {};
+  private previousKeys: { [key: string]: boolean } = {};
   private inputState: InputState = {
     up: false,
     down: false,
@@ -43,19 +44,23 @@ export class InputManager {
   }
 
   private updateInputState(): void {
-    // Movement: WASD only
+    // Movement: WASD only (continuous input)
     this.inputState.up = this.keys['KeyW'] || false;
     this.inputState.down = this.keys['KeyS'] || false;
     this.inputState.left = this.keys['KeyA'] || false;
     this.inputState.right = this.keys['KeyD'] || false;
     
-    // Abilities: Q, E, R
-    this.inputState.ability1 = this.keys['KeyQ'] || false;
-    this.inputState.ability2 = this.keys['KeyE'] || false;
-    this.inputState.ultimate = this.keys['KeyR'] || false;
+    // Abilities: Q, E, R (trigger only on key press, not hold)
+    this.inputState.ability1 = this.isKeyPressed('KeyQ');
+    this.inputState.ability2 = this.isKeyPressed('KeyE');
+    this.inputState.ultimate = this.isKeyPressed('KeyR');
     
-    // Dash: Space
-    this.inputState.dash = this.keys['Space'] || false;
+    // Dash: Space (trigger only on key press)
+    this.inputState.dash = this.isKeyPressed('Space');
+  }
+
+  private isKeyPressed(keyCode: string): boolean {
+    return (this.keys[keyCode] || false) && !(this.previousKeys[keyCode] || false);
   }
 
   private isGameKey(code: string): boolean {
@@ -69,6 +74,11 @@ export class InputManager {
   }
 
   getInputState(): InputState {
-    return { ...this.inputState };
+    const currentInputState = { ...this.inputState };
+    
+    // Update previous keys state after getting current input
+    this.previousKeys = { ...this.keys };
+    
+    return currentInputState;
   }
 }
